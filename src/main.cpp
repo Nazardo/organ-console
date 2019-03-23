@@ -20,6 +20,10 @@ const uint8_t RemoteStatus_StartingOrOn = 1;
 const uint8_t RemoteStatus_StoppingOrOff = 2;
 uint8_t remoteStatus = RemoteStatus_Unknown;
 
+
+unsigned long lastResetMillis = 0;
+const unsigned long resetDebounceMilliseconds = 3000;
+
 unsigned long lastSendMillis = 0;
 const unsigned long SendIntervalMilliseconds = 1000;
 
@@ -29,6 +33,8 @@ bool blinkMultiplier = false;
 
 // Start/Stop message: [1 : Type(1B)][1 : Version(1B)][0/1 : Command(1B)][0..3 : HWConfig(1B)]
 char startStopMessage[] = {0x01, 0x01, 0x00, 0x00};
+// Reset message: [2 : Type(1B)][1 : Version(1B)]
+char resetMessage[] = {0x02, 0x01};
 
 void onUdpPacketReceived(uint16_t, uint8_t *, uint16_t, const char *, uint16_t);
 
@@ -37,6 +43,7 @@ const uint8_t LedYellowPin = 3;
 const uint8_t LedGreenPin = 4;
 const uint8_t ButtonStartPin = 5;
 const uint8_t ButtonStopPin = 6;
+const uint8_t ButtonResetPin = 7;
 
 bool ledRedActive = false;
 bool ledRedBlinking = false;
@@ -54,6 +61,7 @@ void setup()
   pinMode(LedGreenPin, OUTPUT);
   pinMode(ButtonStartPin, INPUT_PULLUP);
   pinMode(ButtonStopPin, INPUT_PULLUP);
+  pinMode(ButtonResetPin, INPUT_PULLUP);
   ether.begin(sizeof Ethernet::buffer, macaddr, SS);
   ether.staticSetup(ip, 0, 0, netmask);
   ether.copyIp(ether.hisip, serverIp);
@@ -101,6 +109,9 @@ void loop()
     startStopMessage[2] = command;
     ether.sendUdp(startStopMessage, sizeof startStopMessage, udpPort, serverIp, udpPort);
     lastSendMillis = now;
+  } else if (digitalRead(ButtonResetPin) == 0 && now - lastResetMillis > resetDebounceMilliseconds) {
+    ether.sendUdp(resetMessage, sizeof resetMessage, udpPort, serverIp, udpPort);
+    lastResetMillis = now;
   }
 }
 
