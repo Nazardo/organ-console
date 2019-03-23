@@ -15,9 +15,10 @@ const uint8_t InternalStatus_SendStart = 1;
 const uint8_t InternalStatus_SendStop = 2;
 uint8_t internalStatus = InternalStatus_Idle;
 
+const uint8_t RemoteStatus_Unknown = 0;
 const uint8_t RemoteStatus_StartingOrOn = 1;
 const uint8_t RemoteStatus_StoppingOrOff = 2;
-uint8_t remoteStatus = RemoteStatus_StoppingOrOff;
+uint8_t remoteStatus = RemoteStatus_Unknown;
 
 unsigned long lastSendMillis = 0;
 const unsigned long SendIntervalMilliseconds = 1000;
@@ -31,11 +32,11 @@ char startStopMessage[] = {0x01, 0x01, 0x00, 0x00};
 
 void onUdpPacketReceived(uint16_t, uint8_t *, uint16_t, const char *, uint16_t);
 
-const uint8_t LedRed = PIN2;
-const uint8_t LedYellow = PIN3;
-const uint8_t LedGreen = PIN4;
-const uint8_t ButtonStart = PIN5;
-const uint8_t ButtonStop = PIN6;
+const uint8_t LedRedPin = 2;
+const uint8_t LedYellowPin = 3;
+const uint8_t LedGreenPin = 4;
+const uint8_t ButtonStartPin = 5;
+const uint8_t ButtonStopPin = 6;
 
 bool ledRedActive = false;
 bool ledRedBlinking = false;
@@ -48,11 +49,11 @@ void setup()
 {
   Serial.begin(9600);
   wdt_enable(WDTO_8S);
-  pinMode(LedRed, OUTPUT);
-  pinMode(LedYellow, OUTPUT);
-  pinMode(LedGreen, OUTPUT);
-  pinMode(ButtonStart, INPUT);
-  pinMode(ButtonStop, INPUT);
+  pinMode(LedRedPin, OUTPUT);
+  pinMode(LedYellowPin, OUTPUT);
+  pinMode(LedGreenPin, OUTPUT);
+  pinMode(ButtonStartPin, INPUT_PULLUP);
+  pinMode(ButtonStopPin, INPUT_PULLUP);
   ether.begin(sizeof Ethernet::buffer, macaddr, SS);
   ether.staticSetup(ip, 0, 0, netmask);
   ether.copyIp(ether.hisip, serverIp);
@@ -66,14 +67,14 @@ void loop()
   wdt_reset();
   uint16_t recv = ether.packetReceive();
   ether.packetLoop(recv);
-  digitalWrite(LedRed, ledRedActive || (ledRedBlinking && blinkMultiplier));
-  digitalWrite(LedYellow, ledYellowActive || (ledYellowBlinking && blinkMultiplier));
-  digitalWrite(LedGreen, ledGreenActive || (ledGreenBlinking && blinkMultiplier));
-  if (digitalRead(ButtonStart) && remoteStatus == RemoteStatus_StoppingOrOff)
+  digitalWrite(LedRedPin, ledRedActive || (ledRedBlinking && blinkMultiplier));
+  digitalWrite(LedYellowPin, ledYellowActive || (ledYellowBlinking && blinkMultiplier));
+  digitalWrite(LedGreenPin, ledGreenActive || (ledGreenBlinking && blinkMultiplier));
+  if (digitalRead(ButtonStartPin) == 0 && remoteStatus == RemoteStatus_StoppingOrOff)
   {
     internalStatus = InternalStatus_SendStart;
   }
-  else if (digitalRead(ButtonStop) && remoteStatus == RemoteStatus_StartingOrOn)
+  else if (digitalRead(ButtonStopPin) == 0 && remoteStatus == RemoteStatus_StartingOrOn)
   {
     internalStatus = InternalStatus_SendStop;
   }
@@ -81,15 +82,25 @@ void loop()
   if (now - blinkMillis > BlinkIntervalMilliseconds)
   {
     blinkMultiplier = !blinkMultiplier;
+    blinkMillis = now;
   }
-  if (internalStatus == InternalStatus_SendStart || internalStatus == InternalStatus_SendStop)
+  if ((internalStatus == InternalStatus_SendStart || internalStatus == InternalStatus_SendStop)
+      && now - lastSendMillis > SendIntervalMilliseconds)
   {
-    if ((now - lastSendMillis) > SendIntervalMilliseconds)
+    uint8_t command = 0;
+    if (internalStatus == InternalStatus_SendStart)
     {
-      startStopMessage[2] = internalStatus == InternalStatus_SendStart ? 1 : 0;
-      ether.sendUdp(startStopMessage, sizeof startStopMessage, udpPort, serverIp, udpPort);
-      lastSendMillis = now;
+      Serial.println("UDP > Send START");
+      command = 1;
     }
+    else
+    {
+      Serial.println("UDP > Send STOP");
+      command = 0;
+    }
+    startStopMessage[2] = command;
+    ether.sendUdp(startStopMessage, sizeof startStopMessage, udpPort, serverIp, udpPort);
+    lastSendMillis = now;
   }
 }
 
