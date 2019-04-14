@@ -7,8 +7,8 @@ uint8_t outputBuffer[100];
 const uint8_t macaddr[] = {0x47, 0xF8, 0xEA, 0x3A, 0xFB, 0x7C};
 const uint8_t ip[] = {192, 168, 89, 101};
 const uint8_t netmask[] = {255, 255, 255, 0};
-const uint16_t udpPort = 10089;
-const uint8_t serverIp[] = {192, 168, 89, 10};
+const uint16_t udpPort = 9000;
+const uint8_t serverIp[] = {192, 168, 89, 5};
 
 const uint8_t InternalStatus_Idle = 0;
 const uint8_t InternalStatus_SendStart = 1;
