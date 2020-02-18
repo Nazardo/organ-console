@@ -4,51 +4,52 @@
 
 uint8_t Ethernet::buffer[700];
 uint8_t outputBuffer[100];
-const uint8_t macaddr[] = {0x47, 0xF8, 0xEA, 0x3A, 0xFB, 0x7C};
-const uint8_t ip[] = {192, 168, 89, 101};
+const uint8_t MacAddress[] = {0x47, 0xF8, 0xEA, 0x3A, 0xFB, 0x7C};
+const uint8_t LocalIp[] = {192, 168, 89, 101};
 const uint8_t netmask[] = {255, 255, 255, 0};
-const uint16_t udpPort = 9000;
-const uint8_t serverIp[] = {192, 168, 89, 5};
-
-const uint8_t InternalStatus_Idle = 0;
-const uint8_t InternalStatus_SendStart = 1;
-const uint8_t InternalStatus_SendStop = 2;
-uint8_t internalStatus = InternalStatus_Idle;
-
-const uint8_t RemoteStatus_Unknown = 0;
-const uint8_t RemoteStatus_StartingOrOn = 1;
-const uint8_t RemoteStatus_StoppingOrOff = 2;
-uint8_t remoteStatus = RemoteStatus_Unknown;
-
-
-unsigned long lastResetMillis = 0;
-const unsigned long resetDebounceMilliseconds = 3000;
-
-unsigned long lastSendMillis = 0;
-const unsigned long SendIntervalMilliseconds = 1000;
-
-unsigned long blinkMillis = 0;
-const unsigned long BlinkIntervalMilliseconds = 500;
-bool blinkMultiplier = false;
-
-// Start/Stop message: [1 : Type(1B)][1 : Version(1B)][0/1 : Command(1B)][0..3 : HWConfig(1B)]
-char startStopMessage[] = {0x01, 0x01, 0x00, 0x00};
-// Reset message: [2 : Type(1B)][1 : Version(1B)]
-char resetMessage[] = {0x02, 0x01};
-
-void onUdpPacketReceived(uint16_t, uint8_t *, uint16_t, const char *, uint16_t);
+const uint16_t UdpPort = 9000;
+const uint8_t ServerIp[] = {192, 168, 89, 5};
+const uint8_t ConsoleId = 0x01;
 
 const uint8_t LedRedPin = 2;
 const uint8_t LedYellowPin = 3;
 const uint8_t LedGreenPin = 4;
-const uint8_t ButtonStartPin = 5;
-const uint8_t ButtonStopPin = 6;
-const uint8_t ButtonResetPin = 7;
+const uint8_t ButtonGreenPin = 5;
+const uint8_t ButtonRedPin = 6;
+const uint8_t ButtonBlackPin = 7;
+const uint8_t NumberOfButtons = 3;
+
+const uint8_t ButtonStatus_Idle = 0;
+const uint8_t ButtonStatus_Pressing = 1;
+const uint8_t ButtonStatus_Releasing = 2;
+
+uint8_t buttonPins[] = { ButtonGreenPin, ButtonRedPin, ButtonBlackPin };
+uint8_t buttonStatuses[] = { ButtonStatus_Idle, ButtonStatus_Idle, ButtonStatus_Idle };
+unsigned long lastButtonUpdateTimes[] = { 0, 0, 0 };
+
+const unsigned long ButtonDebounceInterval = 1000;
+const unsigned long ButtonLongPressInterval = 5000;
+
+unsigned long lastConsoleMessageSent = 0;
+const unsigned long KeepAliveSendInterval = 3000;
+
+unsigned long blinkMillis = 0;
+const unsigned long BlinkInterval = 500;
+bool blinkMultiplier = false;
+
+// Console message
+// sent every KeepAliveSendInterval milliseconds or each time a button is pressed.
+// [00000001] -> 1
+// [XXXXXXXX] -> X: console id
+// [P0000XXX] -> P: 0/1 short/long press, X: button number
+char consoleMessage[] = { 0x01, ConsoleId, 0x00 };
+
+void onUdpPacketReceived(uint16_t, uint8_t *, uint16_t, const char *, uint16_t);
 
 bool ledRedActive = false;
 bool ledRedBlinking = false;
 bool ledYellowActive = false;
-bool ledYellowBlinking = true;
+bool ledYellowBlinking = false;
 bool ledGreenActive = false;
 bool ledGreenBlinking = false;
 
@@ -59,13 +60,13 @@ void setup()
   pinMode(LedRedPin, OUTPUT);
   pinMode(LedYellowPin, OUTPUT);
   pinMode(LedGreenPin, OUTPUT);
-  pinMode(ButtonStartPin, INPUT_PULLUP);
-  pinMode(ButtonStopPin, INPUT_PULLUP);
-  pinMode(ButtonResetPin, INPUT_PULLUP);
-  ether.begin(sizeof Ethernet::buffer, macaddr, SS);
-  ether.staticSetup(ip, 0, 0, netmask);
-  ether.copyIp(ether.hisip, serverIp);
-  ether.udpServerListenOnPort(onUdpPacketReceived, udpPort);
+  pinMode(ButtonGreenPin, INPUT_PULLUP);
+  pinMode(ButtonRedPin, INPUT_PULLUP);
+  pinMode(ButtonBlackPin, INPUT_PULLUP);
+  ether.begin(sizeof Ethernet::buffer, MacAddress, SS);
+  ether.staticSetup(LocalIp, 0, 0, netmask);
+  ether.copyIp(ether.hisip, ServerIp);
+  ether.udpServerListenOnPort(onUdpPacketReceived, UdpPort);
   wdt_reset();
   delay(5000);
 }
@@ -75,75 +76,59 @@ void loop()
   wdt_reset();
   uint16_t recv = ether.packetReceive();
   ether.packetLoop(recv);
-  digitalWrite(LedRedPin, ledRedActive || (ledRedBlinking && blinkMultiplier));
-  digitalWrite(LedYellowPin, ledYellowActive || (ledYellowBlinking && blinkMultiplier));
-  digitalWrite(LedGreenPin, ledGreenActive || (ledGreenBlinking && blinkMultiplier));
-  if (digitalRead(ButtonStartPin) == 0 && remoteStatus == RemoteStatus_StoppingOrOff)
-  {
-    internalStatus = InternalStatus_SendStart;
-  }
-  else if (digitalRead(ButtonStopPin) == 0 && remoteStatus == RemoteStatus_StartingOrOn)
-  {
-    internalStatus = InternalStatus_SendStop;
-  }
   unsigned long now = millis();
-  if (now - blinkMillis > BlinkIntervalMilliseconds)
+  if (now - blinkMillis > BlinkInterval)
   {
     blinkMultiplier = !blinkMultiplier;
     blinkMillis = now;
+    digitalWrite(LedRedPin, ledRedActive || (ledRedBlinking && blinkMultiplier));
+    digitalWrite(LedYellowPin, ledYellowActive || (ledYellowBlinking && blinkMultiplier));
+    digitalWrite(LedGreenPin, ledGreenActive || (ledGreenBlinking && blinkMultiplier));
   }
-  if ((internalStatus == InternalStatus_SendStart || internalStatus == InternalStatus_SendStop)
-      && now - lastSendMillis > SendIntervalMilliseconds)
-  {
-    uint8_t command = 0;
-    if (internalStatus == InternalStatus_SendStart)
-    {
-      Serial.println("UDP > Send START");
-      command = 1;
+  uint8_t buttonPressedByte = 0x00;
+  // Debounce routine for input buttons.
+  // For each button, its status and the time at which it entered such status are stored.
+  // Transitions last for at least ButtonDebounceMilliseconds milliseconds.
+  for (uint8_t btnId = 0; btnId < NumberOfButtons; ++btnId) {
+    bool debounceElapsed = (now - lastButtonUpdateTimes[btnId]) > ButtonDebounceInterval;
+    if (debounceElapsed) {
+      uint8_t buttonStatus = buttonStatuses[btnId];
+      if (digitalRead(buttonPins[btnId]) == 0) {
+        if (buttonStatus == ButtonStatus_Idle) {
+          buttonStatuses[btnId] = ButtonStatus_Pressing;
+          lastButtonUpdateTimes[btnId] = now;
+        }
+      } else if (buttonStatus == ButtonStatus_Pressing) {
+        bool isLongPress = (now - lastButtonUpdateTimes[btnId]) > ButtonLongPressInterval;
+        buttonPressedByte = btnId;
+        if (isLongPress) {
+          buttonPressedByte |= 0x80;
+        }
+        buttonStatuses[btnId] = ButtonStatus_Releasing;
+        lastButtonUpdateTimes[btnId] = now;
+        break;
+      } else if (buttonStatus == ButtonStatus_Releasing){
+        buttonStatuses[btnId] = ButtonStatus_Idle;
+        lastButtonUpdateTimes[btnId] = now;
+      }
     }
-    else
-    {
-      Serial.println("UDP > Send STOP");
-      command = 0;
-    }
-    startStopMessage[2] = command;
-    ether.sendUdp(startStopMessage, sizeof startStopMessage, udpPort, serverIp, udpPort);
-    lastSendMillis = now;
-  } else if (digitalRead(ButtonResetPin) == 0 && now - lastResetMillis > resetDebounceMilliseconds) {
-    ether.sendUdp(resetMessage, sizeof resetMessage, udpPort, serverIp, udpPort);
-    lastResetMillis = now;
+  }
+
+  if (buttonPressedByte || (now - lastConsoleMessageSent) > KeepAliveSendInterval) {
+    consoleMessage[2] = buttonPressedByte;
+    ether.sendUdp(consoleMessage, sizeof consoleMessage, UdpPort, ServerIp, UdpPort);
+    lastConsoleMessageSent = now;
   }
 }
 
-void onStatusMessageReceived(const char *data, uint16_t len, uint8_t version)
+void parseLedValues(uint8_t ledByte)
 {
-  if (version == 1 && len == 3)
-  {
-    uint8_t stateMachineStatus = (uint8_t)data[2];
-    ledYellowBlinking = false; // Stop blinking since message has arrived
-    ledRedActive = stateMachineStatus == 0 || stateMachineStatus == 6;
-    ledRedBlinking = stateMachineStatus == 5;
-    ledGreenActive = stateMachineStatus == 2 || stateMachineStatus == 3;
-    ledGreenBlinking = stateMachineStatus == 1;
-    ledYellowActive = !(stateMachineStatus == 0 || stateMachineStatus == 3);
-
-    if (stateMachineStatus > 0 && stateMachineStatus < 4)
-    {
-      remoteStatus = RemoteStatus_StartingOrOn;
-      if (internalStatus == InternalStatus_SendStart)
-      {
-        internalStatus = InternalStatus_Idle;
-      }
-    }
-    else
-    {
-      remoteStatus = RemoteStatus_StoppingOrOff;
-      if (internalStatus == InternalStatus_SendStop)
-      {
-        internalStatus = InternalStatus_Idle;
-      }
-    }
-  }
+  ledGreenActive = ledByte & 0x01;
+  ledGreenBlinking = ledByte & 0x02;
+  ledYellowActive = ledByte & 0x04;
+  ledYellowBlinking = ledByte & 0x08;
+  ledRedActive = ledByte & 0x10;
+  ledRedBlinking = ledByte & 0x20;
 }
 
 const uint8_t MessateType_Status = 0;
@@ -155,11 +140,11 @@ void onUdpPacketReceived(uint16_t dest_port, uint8_t src_ip[IP_LEN], uint16_t sr
   {
     return;
   }
-  uint8_t version = (uint8_t)data[1];
-  switch (data[0])
+  uint8_t msgType = (uint8_t)data[0];
+  switch (msgType)
   {
   case 0x00:
-    onStatusMessageReceived(data, len, version);
+    parseLedValues(data[1]);
     break;
   }
 }
