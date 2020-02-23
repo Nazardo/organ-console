@@ -41,7 +41,7 @@ bool blinkMultiplier = false;
 // sent every KeepAliveSendInterval milliseconds or each time a button is pressed.
 // [00000001] -> 1
 // [XXXXXXXX] -> X: console id
-// [P0000XXX] -> P: 0/1 short/long press, X: button number
+// [PL0000XX] -> P: pressed?, L: short/long press, X: button number (0-NumberOfButtons)
 char consoleMessage[] = { 0x01, ConsoleId, 0x00 };
 
 void onUdpPacketReceived(uint16_t, uint8_t *, uint16_t, const char *, uint16_t);
@@ -100,9 +100,9 @@ void loop()
         }
       } else if (buttonStatus == ButtonStatus_Pressing) {
         bool isLongPress = (now - lastButtonUpdateTimes[btnId]) > ButtonLongPressInterval;
-        buttonPressedByte = btnId;
+        buttonPressedByte = 0x80 | btnId;
         if (isLongPress) {
-          buttonPressedByte |= 0x80;
+          buttonPressedByte |= 0x40;
         }
         buttonStatuses[btnId] = ButtonStatus_Releasing;
         lastButtonUpdateTimes[btnId] = now;
