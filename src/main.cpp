@@ -123,16 +123,13 @@ void loop()
 
 void parseLedValues(uint8_t ledByte)
 {
-  ledGreenActive = ledByte & 0x01;
-  ledGreenBlinking = ledByte & 0x02;
+  ledRedActive = ledByte & 0x01;
+  ledRedBlinking = ledByte & 0x02;
   ledYellowActive = ledByte & 0x04;
   ledYellowBlinking = ledByte & 0x08;
-  ledRedActive = ledByte & 0x10;
-  ledRedBlinking = ledByte & 0x20;
+  ledGreenActive = ledByte & 0x10;
+  ledGreenBlinking = ledByte & 0x20;
 }
-
-const uint8_t MessateType_Status = 0;
-const uint8_t MessageType_StartStop = 1;
 
 void onUdpPacketReceived(uint16_t dest_port, uint8_t src_ip[IP_LEN], uint16_t src_port, const char *data, uint16_t len)
 {
