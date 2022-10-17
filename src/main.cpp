@@ -8,7 +8,7 @@ const uint8_t MacAddress[] = {0x47, 0xF8, 0xEA, 0x3A, 0xFB, 0x7C};
 const uint8_t LocalIp[] = {192, 168, 89, 101};
 const uint8_t netmask[] = {255, 255, 255, 0};
 const uint16_t UdpPort = 9000;
-const uint8_t ServerIp[] = {192, 168, 89, 5};
+const uint8_t ServerIp[] = {192, 168, 89, 255};
 const uint8_t ConsoleId = 0x01;
 
 const uint8_t LedRedPin = 2;
